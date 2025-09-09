@@ -1,0 +1,44 @@
+{
+  "name": "actions-copilot",
+  "version": "1.0.0",
+  "description": "A Probot GitHub App that uses GitHub Copilot to protect environments from malicious GitHub Actions workflows",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "probot run ./dist/index.js",
+    "dev": "nodemon --exec \"npm run build && npm start\"",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "clean": "rm -rf dist",
+    "docker:build": "docker build -t actions-copilot .",
+    "docker:run": "docker run -p ${PORT:-3000}:${PORT:-3000} --env-file .env actions-copilot",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
+  },
+  "keywords": [
+    "probot",
+    "github",
+    "bot",
+    "security",
+    "copilot",
+    "actions",
+    "environment-protection"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node": "^24.3.0",
+    "axios": "^1.11.0",
+    "nodemon": "^3.1.10",
+    "probot": "^14.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.1.2"
+  },
+  "engines": {
+    "node": ">= 18"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.production
+*.log
+*.pem
+.DS_Store
+.vscode/
+coverage/
+*.tgz
+*.tar.gz
+.github/actions-copilot-config.json
+
+# Docker
+docker-compose.override.yml

@@ -1,0 +1,28 @@
+{
+  "llm": {
+    "apiUrl": "https://api.githubcopilot.com/chat/completions",
+    "apiKey": "your_github_token_here",
+    "model": "gpt-4o",
+    "maxTokens": 1000,
+    "temperature": 0.2
+  },
+  "protectionRules": {
+    "enabledEnvironments": ["production", "staging"],
+    "blockOnMaliciousDetection": true,
+    "allowedActions": [
+      "actions/checkout",
+      "actions/setup-node",
+      "actions/upload-artifact",
+      "actions/download-artifact"
+    ],
+    "blockedKeywords": [
+      "rm -rf",
+      "curl",
+      "wget",
+      "download",
+      "exec",
+      "eval",
+      "sudo"
+    ]
+  }
+}
