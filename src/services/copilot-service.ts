@@ -80,18 +80,13 @@ Provide your analysis in the specified JSON format.`;
 
   private async callCopilot(request: CopilotRequest, config: LLMConfig): Promise<CopilotResponse> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json"
+      "authorization": `Bearer ${config.apiKey}`,
+      "content-type": "application/json"
     };
 
-    // Handle GitHub Copilot API authentication
+    // GitHub Copilot API requires this additional header
     if (config.apiUrl.includes("githubcopilot.com")) {
-      headers["Authorization"] = `Bearer ${config.apiKey}`;
-      headers["Editor-Version"] = "vscode/1.93.0";
-      headers["Editor-Plugin-Version"] = "copilot-chat/0.17.0";
-      headers["User-Agent"] = "GitHubCopilotChat/0.17.0";
-    } else {
-      // Standard OpenAI-compatible API
-      headers["Authorization"] = `Bearer ${config.apiKey}`;
+      headers["Copilot-Integration-Id"] = "copilot-chat";
     }
 
     const response = await axios.post(config.apiUrl, request, {

