@@ -85,7 +85,17 @@ Provide your analysis in the specified JSON format.`;
     };
 
     // GitHub Copilot API requires this additional header
-    if (config.apiUrl.includes("githubcopilot.com")) {
+    let apiHost: string;
+    try {
+      apiHost = new URL(config.apiUrl).host;
+    } catch {
+      apiHost = "";
+    }
+    const allowedCopilotHosts = [
+      "api.githubcopilot.com",
+      "copilot.githubcopilot.com"
+    ];
+    if (allowedCopilotHosts.includes(apiHost)) {
       headers["Copilot-Integration-Id"] = "copilot-chat";
     }
 
