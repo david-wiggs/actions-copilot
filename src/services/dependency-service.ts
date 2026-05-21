@@ -63,7 +63,8 @@ export class DependencyService {
       policyViolations.push(...advisories);
 
     } catch (error) {
-      context.log.warn("Error resolving action dependencies, continuing with partial data");
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      context.log.warn(`Error resolving action dependencies, continuing with partial data: ${errorMessage}`);
     }
 
     return {
