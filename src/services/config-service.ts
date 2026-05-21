@@ -15,6 +15,16 @@ export class ConfigService {
       blockOnMaliciousDetection: process.env.BLOCK_ON_MALICIOUS === "true",
       allowedActions: (process.env.ALLOWED_ACTIONS || "").split(",").filter(Boolean),
       blockedKeywords: (process.env.BLOCKED_KEYWORDS || "rm -rf,curl,wget,download").split(",")
+    },
+    dependencyAnalysis: {
+      enabled: process.env.DEPENDENCY_ANALYSIS_ENABLED !== "false",
+      resolveTransitive: process.env.DEPENDENCY_RESOLVE_TRANSITIVE !== "false",
+      requireShaPin: process.env.DEPENDENCY_REQUIRE_SHA_PIN === "true",
+      approvedOrganizations: (process.env.DEPENDENCY_APPROVED_ORGS || "").split(",").filter(Boolean),
+      blockedActions: (process.env.DEPENDENCY_BLOCKED_ACTIONS || "").split(",").filter(Boolean),
+      approvedRegistries: (process.env.DEPENDENCY_APPROVED_REGISTRIES || "").split(",").filter(Boolean),
+      blockOnPolicyViolation: process.env.DEPENDENCY_BLOCK_ON_VIOLATION === "true",
+      minimumViolationSeverity: (process.env.DEPENDENCY_MIN_SEVERITY as "critical" | "high" | "medium" | "low") || "high",
     }
   };
 
@@ -22,11 +32,19 @@ export class ConfigService {
     try {
       // Try to load config from repository
       const repoConfig = await this.loadRepoConfig(context);
-      return { ...this.defaultConfig, ...repoConfig };
+      return this.mergeConfigs(this.defaultConfig, repoConfig);
     } catch (error) {
       context.log.warn("Could not load repository config, using defaults");
       return this.defaultConfig;
     }
+  }
+
+  private mergeConfigs(base: AppConfig, override: Partial<AppConfig>): AppConfig {
+    return {
+      llm: { ...base.llm, ...(override.llm || {}) },
+      protectionRules: { ...base.protectionRules, ...(override.protectionRules || {}) },
+      dependencyAnalysis: { ...base.dependencyAnalysis, ...(override.dependencyAnalysis || {}) },
+    };
   }
 
   private async loadRepoConfig(context: Context): Promise<Partial<AppConfig>> {

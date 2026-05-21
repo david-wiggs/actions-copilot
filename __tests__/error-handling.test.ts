@@ -32,6 +32,15 @@ describe('LLM Error Handling and Resilience', () => {
         blockedKeywords: ['curl', 'wget'],
         allowedActions: ['actions/checkout'],
         blockOnMaliciousDetection: true
+      },
+      dependencyAnalysis: {
+        enabled: false,
+        resolveTransitive: false,
+        requireShaPin: false,
+        approvedOrganizations: [],
+        blockedActions: [],
+        blockOnPolicyViolation: false,
+        minimumViolationSeverity: "high" as const
       }
     };
     

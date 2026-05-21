@@ -6,6 +6,8 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
 
 - **GitHub Copilot-Powered Security Analysis**: Uses GitHub Copilot API to analyze workflow content with advanced understanding of GitHub Actions patterns
 - **Environment Protection**: Protects specific environments (production, staging, etc.) from malicious deployments
+- **Dependency-Aware Analysis**: Resolves the full dependency tree of actions referenced in workflows (including transitive composite action dependencies), inspired by [jessehouwing/actions-dependency-submission](https://github.com/jessehouwing/actions-dependency-submission)
+- **Supply Chain Risk Detection**: Flags unpinned action references, unapproved organizations, typosquatting, and Docker images from untrusted registries
 - **Configurable Rules**: Supports both environment variables and repository-specific configuration
 - **Flexible Responses**: Can approve, reject, or request manual review based on analysis confidence
 - **Comprehensive Logging**: Detailed logging for security audit trails
@@ -15,8 +17,9 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
 1. **Webhook Reception**: Listens for `deployment_protection_rule.requested` events
 2. **Environment Check**: Verifies if the target environment is protected
 3. **Workflow Analysis**: Fetches and analyzes the workflow content using GitHub Copilot
-4. **Security Decision**: Makes approval/rejection decisions based on Copilot analysis
-5. **Response**: Responds to GitHub with the protection rule decision
+4. **Dependency Resolution**: Resolves the full action dependency tree (direct + transitive) and evaluates supply chain policies
+5. **Security Decision**: Makes approval/rejection decisions based on Copilot analysis combined with dependency context
+6. **Response**: Responds to GitHub with the protection rule decision
 
 ## Installation
 
@@ -76,6 +79,13 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
 | `BLOCK_ON_MALICIOUS` | Whether to block on malicious detection | `true` |
 | `ALLOWED_ACTIONS` | Comma-separated list of allowed GitHub Actions | Empty |
 | `BLOCKED_KEYWORDS` | Comma-separated list of blocked keywords | `rm -rf,curl,wget,download` |
+| `DEPENDENCY_ANALYSIS_ENABLED` | Enable dependency-aware analysis | `true` |
+| `DEPENDENCY_RESOLVE_TRANSITIVE` | Resolve transitive action dependencies | `true` |
+| `DEPENDENCY_REQUIRE_SHA_PIN` | Flag actions not pinned to SHA | `false` |
+| `DEPENDENCY_APPROVED_ORGS` | Comma-separated approved action organizations | (empty) |
+| `DEPENDENCY_BLOCKED_ACTIONS` | Comma-separated blocked actions | (empty) |
+| `DEPENDENCY_BLOCK_ON_VIOLATION` | Block on dependency policy violations | `false` |
+| `DEPENDENCY_MIN_SEVERITY` | Minimum violation severity to block | `high` |
 
 ### Repository Configuration
 
@@ -94,6 +104,15 @@ You can also configure the bot per repository by creating `.github/actions-copil
     "blockOnMaliciousDetection": true,
     "allowedActions": ["actions/checkout", "actions/setup-node"],
     "blockedKeywords": ["rm -rf", "curl", "sudo"]
+  },
+  "dependencyAnalysis": {
+    "enabled": true,
+    "resolveTransitive": true,
+    "requireShaPin": true,
+    "approvedOrganizations": ["actions", "github", "my-org"],
+    "blockedActions": [],
+    "blockOnPolicyViolation": true,
+    "minimumViolationSeverity": "high"
   }
 }
 ```
@@ -154,10 +173,13 @@ src/
 │   └── environment-protection.ts    # Main webhook handler
 ├── services/
 │   ├── config-service.ts           # Configuration management
-│   └── llm-service.ts              # LLM API integration
+│   ├── copilot-service.ts          # LLM API integration
+│   └── dependency-service.ts       # Action dependency resolution & policy evaluation
 ├── types/
 │   └── index.ts                    # TypeScript type definitions
 └── index.ts                        # Main application entry point
+docs/
+└── dependency-aware-analysis.md    # Detailed enhancement documentation with examples
 ```
 
 ### Testing

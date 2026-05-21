@@ -1,12 +1,14 @@
 import { Context } from "probot";
 import { CopilotService } from "../services/copilot-service";
 import { ConfigService } from "../services/config-service";
+import { DependencyService } from "../services/dependency-service";
 import { WorkflowAnalysis } from "../types";
 
 export class EnvironmentProtectionHandler {
   constructor(
     private copilotService: CopilotService,
-    private configService: ConfigService
+    private configService: ConfigService,
+    private dependencyService: DependencyService
   ) {}
 
   async handleProtectionRule(context: Context<"deployment_protection_rule.requested">) {
@@ -38,8 +40,43 @@ export class EnvironmentProtectionHandler {
         return this.rejectDeployment(context, "No workflow content found for analysis");
       }
 
-      // Analyze workflow with GitHub Copilot
-      const analysis = await this.copilotService.analyzeWorkflow(workflowContent, config);
+      // Resolve action dependencies if enabled
+      let dependencyContext: string | undefined;
+      if (config.dependencyAnalysis.enabled) {
+        context.log.info("Resolving action dependencies for enhanced analysis...");
+        const dependencySnapshot = await this.dependencyService.resolveActionDependencies(
+          context,
+          workflowContent,
+          config.dependencyAnalysis
+        );
+
+        // Check if dependency policy violations alone should block
+        if (config.dependencyAnalysis.blockOnPolicyViolation && dependencySnapshot.policyViolations.length > 0) {
+          const severityOrder = ["low", "medium", "high", "critical"];
+          const minIndex = severityOrder.indexOf(config.dependencyAnalysis.minimumViolationSeverity);
+          const blockingViolations = dependencySnapshot.policyViolations.filter(
+            v => severityOrder.indexOf(v.severity) >= minIndex
+          );
+
+          if (blockingViolations.length > 0) {
+            const reasons = blockingViolations.map(v => v.message);
+            context.log.warn(`Dependency policy violations detected: ${reasons.join("; ")}`);
+            return this.rejectDeployment(
+              context,
+              `Dependency policy violations:\n${reasons.map(r => `• ${r}`).join("\n")}`
+            );
+          }
+        }
+
+        // Format dependency context for LLM analysis
+        dependencyContext = this.dependencyService.formatDependencyContext(dependencySnapshot);
+        context.log.info(
+          `Dependency analysis: ${dependencySnapshot.totalActions} actions (${dependencySnapshot.directActions} direct, ${dependencySnapshot.transitiveActions} transitive), ${dependencySnapshot.policyViolations.length} policy violations`
+        );
+      }
+
+      // Analyze workflow with GitHub Copilot (now with dependency context)
+      const analysis = await this.copilotService.analyzeWorkflow(workflowContent, config, dependencyContext);
       
       context.log.info(`Workflow analysis complete: ${analysis.recommendation} (confidence: ${analysis.confidence})`);
 

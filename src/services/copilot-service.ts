@@ -5,9 +5,9 @@ import { ConfigService } from "./config-service";
 export class CopilotService {
   constructor(private configService: ConfigService) {}
 
-  async analyzeWorkflow(workflowContent: string, config: AppConfig): Promise<WorkflowAnalysis> {
+  async analyzeWorkflow(workflowContent: string, config: AppConfig, dependencyContext?: string): Promise<WorkflowAnalysis> {
     const systemPrompt = this.buildSystemPrompt(config);
-    const userPrompt = this.buildUserPrompt(workflowContent);
+    const userPrompt = this.buildUserPrompt(workflowContent, dependencyContext);
 
     try {
       const response = await this.callCopilot({
@@ -56,6 +56,14 @@ Consider these factors:
 - Actions from untrusted sources
 - Allowed actions: ${allowedActions}
 
+Additionally, analyze the dependency context if provided:
+- Actions pinned to mutable tags/branches instead of SHA commits (supply chain risk)
+- Actions from unapproved or unknown organizations
+- Transitive dependencies that may introduce hidden risks
+- Known vulnerabilities in referenced actions
+- Docker images from untrusted registries
+- Typosquatting or fork confusion (e.g., 'actons/checkout' vs 'actions/checkout')
+
 Respond ONLY with a JSON object in this exact format:
 {
   "isMalicious": boolean,
@@ -68,19 +76,30 @@ Respond ONLY with a JSON object in this exact format:
 Be thorough but balanced. Consider legitimate use cases while identifying genuine security risks. Focus on actual threats rather than stylistic concerns.`;
   }
 
-  private buildUserPrompt(workflowContent: string): string {
-    return `Please analyze this GitHub Actions workflow for security threats:
+  private buildUserPrompt(workflowContent: string, dependencyContext?: string): string {
+    let prompt = `Please analyze this GitHub Actions workflow for security threats:
 
 \`\`\`yaml
 ${workflowContent}
-\`\`\`
+\`\`\``;
+
+    if (dependencyContext) {
+      prompt += `
+
+${dependencyContext}`;
+    }
+
+    prompt += `
 
 Provide your analysis in the specified JSON format.`;
+
+    return prompt;
   }
 
   private async callCopilot(request: CopilotRequest, config: LLMConfig): Promise<CopilotResponse> {
+    const authValue = "Bearer " + config.apiKey;
     const headers: Record<string, string> = {
-      "authorization": `Bearer ${config.apiKey}`,
+      "authorization": authValue,
       "content-type": "application/json"
     };
 
