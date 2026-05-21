@@ -34,6 +34,15 @@ describe('LLM Workflow Analysis Examples', () => {
         blockedKeywords: ['curl', 'wget', 'sudo'],
         allowedActions: ['actions/checkout', 'actions/setup-node'],
         blockOnMaliciousDetection: true
+      },
+      dependencyAnalysis: {
+        enabled: false,
+        resolveTransitive: false,
+        requireShaPin: false,
+        approvedOrganizations: [],
+        blockedActions: [],
+        blockOnPolicyViolation: false,
+        minimumViolationSeverity: "high" as const
       }
     };
     

@@ -32,6 +32,15 @@ describe('End-to-End LLM Security Testing Examples', () => {
         blockedKeywords: ['curl', 'wget', 'nc', 'netcat', 'sudo', 'rm -rf', 'ssh'],
         allowedActions: ['actions/checkout@v4', 'actions/setup-node@v4', 'actions/upload-artifact@v3'],
         blockOnMaliciousDetection: true
+      },
+      dependencyAnalysis: {
+        enabled: false,
+        resolveTransitive: false,
+        requireShaPin: false,
+        approvedOrganizations: [],
+        blockedActions: [],
+        blockOnPolicyViolation: false,
+        minimumViolationSeverity: "high" as const
       }
     };
     

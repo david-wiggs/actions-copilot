@@ -32,6 +32,15 @@ const createConfig = (apiType: 'github' | 'openai'): AppConfig => ({
     blockedKeywords: ['curl', 'wget', 'sudo'],
     allowedActions: ['actions/checkout@v4', 'actions/setup-node@v4'],
     blockOnMaliciousDetection: true
+  },
+  dependencyAnalysis: {
+    enabled: false,
+    resolveTransitive: false,
+    requireShaPin: false,
+    approvedOrganizations: [],
+    blockedActions: [],
+    blockOnPolicyViolation: false,
+    minimumViolationSeverity: "high" as const
   }
 });
 

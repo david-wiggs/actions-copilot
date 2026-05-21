@@ -31,6 +31,15 @@ describe('LLM Integration Tests', () => {
         blockedKeywords: ['curl', 'wget', 'nc', 'netcat', 'sudo', 'rm -rf'],
         allowedActions: ['actions/checkout', 'actions/setup-node'],
         blockOnMaliciousDetection: true
+      },
+      dependencyAnalysis: {
+        enabled: false,
+        resolveTransitive: false,
+        requireShaPin: false,
+        approvedOrganizations: [],
+        blockedActions: [],
+        blockOnPolicyViolation: false,
+        minimumViolationSeverity: "high" as const
       }
     };
     
