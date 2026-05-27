@@ -97,13 +97,15 @@ Provide your analysis in the specified JSON format.`;
   }
 
   private async callCopilot(request: CopilotRequest, config: LLMConfig): Promise<CopilotResponse> {
-    const authValue = "Bearer " + config.apiKey;
     const headers: Record<string, string> = {
-      "authorization": authValue,
       "content-type": "application/json"
     };
 
-    // GitHub Copilot API requires this additional header
+    if (config.apiKey) {
+      headers["authorization"] = "Bearer " + config.apiKey;
+    }
+
+    // GitHub Copilot API requires additional headers
     let apiHost: string;
     try {
       apiHost = new URL(config.apiUrl).host;
@@ -116,6 +118,10 @@ Provide your analysis in the specified JSON format.`;
     ];
     if (allowedCopilotHosts.includes(apiHost)) {
       headers["Copilot-Integration-Id"] = "copilot-chat";
+      headers["Editor-Version"] = "vscode/1.93.0";
+      headers["Editor-Plugin-Version"] = "copilot-chat/0.17.0";
+      headers["User-Agent"] = "GitHubCopilotChat/0.17.0";
+      headers["openai-intent"] = "conversation-edits";
     }
 
     const response = await axios.post(config.apiUrl, request, {

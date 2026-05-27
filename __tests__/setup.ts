@@ -1,10 +1,12 @@
 // Test setup and utilities
 import { jest } from '@jest/globals';
 
-// Setup environment variables for testing
+// Setup environment variables for testing — only set defaults if not already provided
+// (preserves real values when running live tests with actual credentials)
 process.env.NODE_ENV = 'test';
-process.env.GITHUB_TOKEN = 'test-github-token';
-process.env.COPILOT_API_KEY = 'test-copilot-key';
+process.env.GITHUB_TOKEN = process.env.GITHUB_TOKEN || 'test-github-token';
+// Note: COPILOT_API_KEY is intentionally not defaulted here so that live tests
+// can fall through to GITHUB_TOKEN without being shadowed by a fake test value.
 
 // Mock console methods to reduce noise in tests
 const originalConsole = global.console;

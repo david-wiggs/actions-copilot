@@ -105,8 +105,8 @@ jobs:
         }),
         expect.objectContaining({
           headers: expect.objectContaining({
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${mockConfig.llm.apiKey}`
+            'content-type': 'application/json',
+            'authorization': `Bearer ${mockConfig.llm.apiKey}`
           })
         })
       );
@@ -292,9 +292,12 @@ jobs:
 
       const [, , options] = mockedAxios.post.mock.calls[0];
       const headers = options?.headers as Record<string, string>;
+      expect(headers?.['Copilot-Integration-Id']).toBe('copilot-chat');
       expect(headers?.['Editor-Version']).toBe('vscode/1.93.0');
       expect(headers?.['Editor-Plugin-Version']).toBe('copilot-chat/0.17.0');
       expect(headers?.['User-Agent']).toBe('GitHubCopilotChat/0.17.0');
+      expect(headers?.['openai-intent']).toBe('conversation-edits');
+      expect(headers?.['authorization']).toBe(`Bearer ${mockConfig.llm.apiKey}`);
     });
 
     test('should use standard headers for OpenAI API', async () => {
@@ -333,7 +336,7 @@ jobs:
       expect(headers?.['Editor-Version']).toBeUndefined();
       expect(headers?.['Editor-Plugin-Version']).toBeUndefined();
       expect(headers?.['User-Agent']).toBeUndefined();
-      expect(headers?.['Authorization']).toBe(`Bearer ${openaiConfig.llm.apiKey}`);
+      expect(headers?.['authorization']).toBe(`Bearer ${openaiConfig.llm.apiKey}`);
     });
   });
 });

@@ -23,7 +23,7 @@ const createConfig = (apiType: 'github' | 'openai'): AppConfig => ({
     apiKey: apiType === 'openai'
       ? process.env.OPENAI_API_KEY!
       : (process.env.COPILOT_API_KEY || process.env.GITHUB_TOKEN!),
-    model: 'gpt-4',
+    model: 'gpt-4o',
     maxTokens: 1024, // Smaller for tests
     temperature: 0.1
   },
@@ -216,6 +216,15 @@ jobs:
           blockedKeywords: [],
           allowedActions: [],
           blockOnMaliciousDetection: true
+        },
+        dependencyAnalysis: {
+          enabled: false,
+          resolveTransitive: false,
+          requireShaPin: false,
+          approvedOrganizations: [],
+          blockedActions: [],
+          blockOnPolicyViolation: false,
+          minimumViolationSeverity: "high"
         }
       };
 
