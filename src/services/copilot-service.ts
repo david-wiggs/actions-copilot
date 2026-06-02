@@ -10,7 +10,7 @@ export class CopilotService {
     const userPrompt = this.buildUserPrompt(workflowContent, dependencyContext);
 
     try {
-      const response = await this.callCopilot({
+      const request: CopilotRequest = {
         model: config.llm.model,
         messages: [
           { role: "system", content: systemPrompt },
@@ -18,7 +18,14 @@ export class CopilotService {
         ],
         max_tokens: config.llm.maxTokens,
         temperature: config.llm.temperature
-      }, config.llm);
+      };
+
+      // For local LLMs (Ollama), set context window size
+      if (config.llm.apiUrl.includes('localhost') || config.llm.apiUrl.includes('127.0.0.1')) {
+        request.options = { num_ctx: 32768 };
+      }
+
+      const response = await this.callCopilot(request, config.llm);
 
       return this.parseAnalysisResponse(response.choices[0].message.content);
     } catch (error) {
@@ -126,7 +133,7 @@ Provide your analysis in the specified JSON format.`;
 
     const response = await axios.post(config.apiUrl, request, {
       headers,
-      timeout: 30000
+      timeout: 120000
     });
 
     return response.data;
@@ -137,14 +144,31 @@ Provide your analysis in the specified JSON format.`;
       // Extract JSON from the response if it's wrapped in other text
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+        let jsonStr = jsonMatch[0];
+
+        // Try parsing directly first
+        let parsed: Record<string, unknown> | undefined;
+        try {
+          parsed = JSON.parse(jsonStr);
+        } catch {
+          // Local LLMs often put literal newlines/control chars inside string values
+          // Replace all newlines/tabs with spaces (valid for both structure and string content)
+          jsonStr = jsonStr
+            .replace(/\r\n/g, ' ')
+            .replace(/\n/g, ' ')
+            .replace(/\r/g, ' ')
+            .replace(/\t/g, ' ')
+            .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+          parsed = JSON.parse(jsonStr);
+        }
+
         return {
-          isMalicious: Boolean(parsed.isMalicious),
-          confidence: Math.max(0, Math.min(100, Number(parsed.confidence) || 0)),
-          reasoning: String(parsed.reasoning || "No reasoning provided"),
-          detectedThreats: Array.isArray(parsed.detectedThreats) ? parsed.detectedThreats : [],
-          recommendation: ["allow", "block", "review"].includes(parsed.recommendation) 
-            ? parsed.recommendation 
+          isMalicious: Boolean(parsed!.isMalicious),
+          confidence: Math.max(0, Math.min(100, Number(parsed!.confidence) || 0)),
+          reasoning: String(parsed!.reasoning || "No reasoning provided"),
+          detectedThreats: Array.isArray(parsed!.detectedThreats) ? parsed!.detectedThreats : [],
+          recommendation: ["allow", "block", "review"].includes(parsed!.recommendation as string) 
+            ? (parsed!.recommendation as "allow" | "block" | "review")
             : "review"
         };
       }

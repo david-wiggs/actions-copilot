@@ -1,8 +1,7 @@
 {
   "llm": {
-    "apiUrl": "https://api.githubcopilot.com/chat/completions",
-    "apiKey": "your_github_token_here",
-    "model": "gpt-4o",
+    "apiUrl": "http://localhost:11434/v1/chat/completions",
+    "model": "mistral:7b",
     "maxTokens": 1000,
     "temperature": 0.2
   },
@@ -24,5 +23,14 @@
       "eval",
       "sudo"
     ]
+  },
+  "dependencyAnalysis": {
+    "enabled": true,
+    "resolveTransitive": true,
+    "requireShaPin": true,
+    "approvedOrganizations": ["actions", "github"],
+    "blockedActions": [],
+    "blockOnPolicyViolation": true,
+    "minimumViolationSeverity": "high"
   }
 }

@@ -1,10 +1,12 @@
 import { Context } from "probot";
+import axios from "axios";
 import {
   ActionDependency,
   DockerDependency,
   ActionDependencySnapshot,
   DependencyAnalysisConfig,
   DependencyPolicyViolation,
+  LifecycleScriptFinding,
 } from "../types";
 
 /**
@@ -560,5 +562,278 @@ export class DependencyService {
       seen.add(dep.uses);
       return true;
     });
+  }
+
+  /**
+   * Detects whether a workflow runs npm/yarn/pnpm install commands,
+   * meaning lifecycle scripts in package.json would execute.
+   */
+  workflowRunsPackageInstall(workflowContent: string): boolean {
+    const installPatterns = /\b(npm\s+(install|ci|i)\b|yarn(\s+install)?\b|pnpm\s+(install|i)\b)/;
+    return installPatterns.test(workflowContent);
+  }
+
+  /**
+   * Scans package-lock.json for dependencies that declare install lifecycle scripts.
+   * npm records `hasInstallScript: true` for any package with preinstall/install/postinstall hooks.
+   * This is the primary entry point for supply-chain attacks like the RedHat Cloud Services compromise.
+   *
+   * Returns violations for dependencies with install scripts, especially those that
+   * are unusual or from less-common packages (well-known build tools are expected to have them).
+   */
+  scanLockfileForInstallScripts(lockfileContent: string): DependencyPolicyViolation[] {
+    const violations: DependencyPolicyViolation[] = [];
+
+    let lockfile: { packages?: Record<string, { hasInstallScript?: boolean; version?: string; resolved?: string }> };
+    try {
+      lockfile = JSON.parse(lockfileContent);
+    } catch {
+      return violations;
+    }
+
+    const packages = lockfile.packages;
+    if (!packages) return violations;
+
+    // Well-known packages that legitimately use install scripts (native builds, etc.)
+    const expectedInstallScripts = new Set([
+      "esbuild", "sharp", "bcrypt", "node-sass", "sass", "fsevents",
+      "better-sqlite3", "sqlite3", "canvas", "puppeteer", "playwright",
+      "electron", "grpc", "@grpc/grpc-js", "leveldown", "sodium-native",
+      "cpu-features", "node-gyp", "prebuild-install", "node-pre-gyp",
+      "husky", "lefthook", "protobufjs", "core-js", "core-js-pure",
+    ]);
+
+    for (const [pkgPath, meta] of Object.entries(packages)) {
+      if (!meta.hasInstallScript) continue;
+
+      // Skip the root project entry
+      if (pkgPath === "") continue;
+
+      // Extract package name from the path (e.g., "node_modules/@scope/pkg" -> "@scope/pkg")
+      const pkgName = pkgPath.replace(/^node_modules\//, "");
+
+      // Skip well-known packages with legitimate install scripts
+      if (expectedInstallScripts.has(pkgName)) continue;
+
+      violations.push({
+        type: "suspicious-lifecycle-script",
+        severity: "high",
+        package: pkgName + (meta.version ? `@${meta.version}` : ""),
+        message: `Dependency '${pkgName}' declares an install lifecycle script (preinstall/install/postinstall). ` +
+          `These hooks execute arbitrary code during \`npm install\` before application code runs.`,
+        recommendation: "Verify this package legitimately needs install scripts. " +
+          "Supply-chain attacks inject malicious preinstall hooks to run payloads on install. " +
+          "Consider using --ignore-scripts or auditing the package.",
+      });
+    }
+
+    return violations;
+  }
+
+  /**
+   * Scans the repo's own package.json for suspicious lifecycle scripts.
+   * Less critical than dependency scripts but still worth flagging.
+   */
+  scanLifecycleScripts(packageJsonContent: string, packagePath: string = "package.json"): LifecycleScriptFinding[] {
+    const findings: LifecycleScriptFinding[] = [];
+
+    let pkg: Record<string, unknown>;
+    try {
+      pkg = JSON.parse(packageJsonContent);
+    } catch {
+      return findings;
+    }
+
+    const scripts = pkg.scripts as Record<string, string> | undefined;
+    if (!scripts) return findings;
+
+    const lifecycleHooks = ["preinstall", "install", "postinstall", "prepack", "prepare"];
+
+    for (const hook of lifecycleHooks) {
+      const command = scripts[hook];
+      if (!command) continue;
+
+      const indicators = this.detectSuspiciousPatterns(command);
+      if (indicators.length > 0) {
+        findings.push({
+          scriptName: hook,
+          scriptCommand: command,
+          packagePath,
+          indicators,
+        });
+      }
+    }
+
+    return findings;
+  }
+
+  /**
+   * Detects suspicious patterns in a lifecycle script command.
+   * Returns an array of indicator descriptions (empty = benign).
+   */
+  private detectSuspiciousPatterns(command: string): string[] {
+    const indicators: string[] = [];
+
+    // Executing a standalone JS file (common malware pattern: "node index.js")
+    if (/\bnode\s+\S+\.js\b/.test(command) && !/node_modules/.test(command)) {
+      indicators.push("executes a JS file at install time");
+    }
+
+    // eval usage
+    if (/\beval\b/.test(command)) {
+      indicators.push("uses eval");
+    }
+
+    // Network calls during install
+    if (/\b(curl|wget|fetch|http|nc|ncat)\b/.test(command)) {
+      indicators.push("makes network requests during install");
+    }
+
+    // Encoded/obfuscated content indicators
+    if (/\b(base64|--decode|fromCharCode|atob|Buffer\.from)\b/.test(command)) {
+      indicators.push("references encoding/decoding (possible obfuscation)");
+    }
+
+    // Shell piping to interpreters
+    if (/\|\s*(sh|bash|node|python|perl)\b/.test(command)) {
+      indicators.push("pipes output to an interpreter");
+    }
+
+    // Writing to sensitive paths
+    if (/\/(etc|proc|usr\/local\/bin|\.ssh|\.gnupg|\.npmrc)\b/.test(command)) {
+      indicators.push("accesses sensitive system paths");
+    }
+
+    // Process/memory access
+    if (/\/proc\/.*\/mem\b/.test(command)) {
+      indicators.push("attempts process memory access");
+    }
+
+    // Environment variable exfiltration
+    if (/\b(printenv|env\b|process\.env)/.test(command) && /\b(curl|wget|http|>)\b/.test(command)) {
+      indicators.push("possible environment variable exfiltration");
+    }
+
+    // Suppressing errors (silent failure = malware tries to stay hidden)
+    if (/2>\/dev\/null|>\s*\/dev\/null|\|\|\s*true|\|\|\s*exit\s+0/.test(command)) {
+      indicators.push("suppresses errors (stealth behavior)");
+    }
+
+    return indicators;
+  }
+
+  /**
+   * Converts lifecycle script findings into DependencyPolicyViolations.
+   */
+  lifecycleFindingsToViolations(findings: LifecycleScriptFinding[]): DependencyPolicyViolation[] {
+    return findings.map(finding => ({
+      type: "suspicious-lifecycle-script" as const,
+      severity: finding.scriptName === "preinstall" ? "critical" as const : "high" as const,
+      package: finding.packagePath,
+      message: `Suspicious '${finding.scriptName}' script detected: "${finding.scriptCommand}" — ${finding.indicators.join("; ")}`,
+      recommendation: "Audit this lifecycle script before deploying. Malicious packages use install hooks to execute payloads before application code runs.",
+    }));
+  }
+
+  /**
+   * Queries the npm registry for direct dependencies listed in package.json
+   * to check if they have install lifecycle scripts. This catches cases where
+   * the lockfile is stale or the workflow uses `npm install` (which may resolve
+   * newer compromised versions not yet in the lockfile).
+   *
+   * Only checks direct deps (not transitive) for efficiency.
+   * Skips packages on the known-safe allowlist.
+   */
+  async checkRegistryForInstallScripts(packageJsonContent: string): Promise<DependencyPolicyViolation[]> {
+    const violations: DependencyPolicyViolation[] = [];
+
+    let pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+    try {
+      pkg = JSON.parse(packageJsonContent);
+    } catch {
+      return violations;
+    }
+
+    // Combine prod and dev deps
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (!allDeps || Object.keys(allDeps).length === 0) return violations;
+
+    const expectedInstallScripts = new Set([
+      "esbuild", "sharp", "bcrypt", "node-sass", "sass", "fsevents",
+      "better-sqlite3", "sqlite3", "canvas", "puppeteer", "playwright",
+      "electron", "grpc", "@grpc/grpc-js", "leveldown", "sodium-native",
+      "cpu-features", "node-gyp", "prebuild-install", "node-pre-gyp",
+      "husky", "lefthook", "protobufjs", "core-js", "core-js-pure",
+    ]);
+
+    // Check deps in parallel with a concurrency limit
+    const depsToCheck = Object.keys(allDeps).filter(name => !expectedInstallScripts.has(name));
+    const results = await Promise.allSettled(
+      depsToCheck.map(name => this.fetchPackageScripts(name, allDeps[name]))
+    );
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      if (result.status !== "fulfilled" || !result.value) continue;
+
+      const { name, version, scripts } = result.value;
+      const lifecycleHooks = ["preinstall", "install", "postinstall"];
+      const foundHooks = lifecycleHooks.filter(hook => scripts[hook]);
+
+      if (foundHooks.length > 0) {
+        const hookDetails = foundHooks.map(h => `${h}: "${scripts[h]}"`).join("; ");
+        violations.push({
+          type: "suspicious-lifecycle-script",
+          severity: foundHooks.includes("preinstall") ? "critical" : "high",
+          package: `${name}@${version}`,
+          message: `Dependency '${name}@${version}' has install lifecycle scripts (${hookDetails}). ` +
+            `These execute automatically during \`npm install\` before application code runs.`,
+          recommendation: "Verify this package legitimately needs install scripts. " +
+            "Supply-chain attacks (e.g., RedHat Cloud Services compromise) inject preinstall hooks as the attack entry point.",
+        });
+      }
+    }
+
+    return violations;
+  }
+
+  /**
+   * Fetches a package's scripts field from the npm registry.
+   * Uses the abbreviated metadata endpoint for efficiency.
+   */
+  private async fetchPackageScripts(
+    name: string,
+    versionRange: string
+  ): Promise<{ name: string; version: string; scripts: Record<string, string> } | null> {
+    try {
+      // Fetch the full package metadata (we need scripts which isn't in abbreviated)
+      const encodedName = name.replace("/", "%2F");
+      const response = await axios.get(
+        `https://registry.npmjs.org/${encodedName}`,
+        {
+          headers: { Accept: "application/json" },
+          timeout: 5000,
+        }
+      );
+
+      const data = response.data;
+      if (!data || !data.versions) return null;
+
+      // Get the latest version matching the range, or fall back to dist-tags.latest
+      const latestVersion = data["dist-tags"]?.latest;
+      const versionData = data.versions[latestVersion];
+      if (!versionData) return null;
+
+      const scripts = versionData.scripts;
+      if (!scripts) return null;
+
+      // Only return if there are lifecycle hooks present
+      const hasLifecycleHook = ["preinstall", "install", "postinstall"].some(h => scripts[h]);
+      if (!hasLifecycleHook) return null;
+
+      return { name, version: latestVersion, scripts };
+    } catch {
+      return null;
+    }
   }
 }

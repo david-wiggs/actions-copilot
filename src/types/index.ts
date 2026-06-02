@@ -53,11 +53,18 @@ export interface DockerDependency {
 }
 
 export interface DependencyPolicyViolation {
-  type: "unpinned-action" | "unapproved-org" | "blocked-action" | "unapproved-registry" | "unpinned-docker" | "known-vulnerability";
+  type: "unpinned-action" | "unapproved-org" | "blocked-action" | "unapproved-registry" | "unpinned-docker" | "known-vulnerability" | "suspicious-lifecycle-script";
   severity: "critical" | "high" | "medium" | "low";
   package: string;
   message: string;
   recommendation: string;
+}
+
+export interface LifecycleScriptFinding {
+  scriptName: string;
+  scriptCommand: string;
+  packagePath: string;
+  indicators: string[];
 }
 
 export interface ActionDependencySnapshot {
@@ -77,6 +84,7 @@ export interface CopilotRequest {
   }>;
   max_tokens: number;
   temperature: number;
+  options?: Record<string, unknown>;
 }
 
 export interface CopilotResponse {

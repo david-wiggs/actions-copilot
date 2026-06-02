@@ -11,7 +11,7 @@ npm run test:llm-manual
 
 **Features:**
 - Test specific workflow files
-- Choose between different APIs (GitHub Copilot, OpenAI)
+- Choose between different LLM providers (Ollama, OpenAI)
 - See detailed analysis results
 - Quick and simple
 
@@ -23,7 +23,7 @@ npm run test:llm-manual
 # Test a specific workflow file
 npm run test:llm-manual -- --workflow=fixtures/malicious-workflow.yml
 
-# Use OpenAI instead of GitHub Copilot
+# Use OpenAI instead of Ollama
 npm run test:llm-manual -- --api=openai
 ```
 
@@ -52,39 +52,29 @@ npm run test:live
 
 ## 🔑 API Key Setup
 
-Before testing, you need to set up API keys:
+Before testing, you need an LLM provider running:
 
-### GitHub Copilot API
+### Ollama (Default — Local)
 ```bash
-export GITHUB_TOKEN="your-github-token"
-# OR
-export COPILOT_API_KEY="your-copilot-key"
+# Install Ollama: https://ollama.ai
+ollama pull mistral:7b
+ollama serve
 ```
 
-### OpenAI API
+No API key needed — set `LLM_API_KEY=ollama` in `.env`.
+
+### OpenAI (Alternative)
 ```bash
 export OPENAI_API_KEY="your-openai-key"
 ```
 
-### Getting API Keys
-
-#### GitHub Token
-1. Go to GitHub → Settings → Developer settings → Personal access tokens
-2. Generate new token with `read:user` scope
-3. Some endpoints may require additional scopes
-
-#### OpenAI API Key
-1. Visit https://platform.openai.com/api-keys
-2. Create new secret key
-3. Note: This will incur usage costs
-
 ## 🚀 Quick Start Example
 
-Let's test a malicious workflow:
+Let’s test a malicious workflow:
 
 ```bash
-# 1. Set your API key
-export GITHUB_TOKEN="your-token-here"
+# 1. Ensure Ollama is running
+ollama serve
 
 # 2. Run interactive test
 npm run test:llm-interactive
@@ -155,7 +145,7 @@ jobs:
    - Load from file path
 
 2. **Select API:**
-   - GitHub Copilot (default)
+   - Ollama (default, local)
    - OpenAI (if key available)
 
 3. **Review results:**
@@ -213,18 +203,17 @@ protectionRules: {
 
 **"No API keys found"**
 ```bash
-# Check your environment variables
-echo $GITHUB_TOKEN
-echo $OPENAI_API_KEY
+# Ensure Ollama is running
+ollama serve
 
-# Set them if missing
-export GITHUB_TOKEN="your-token"
+# Or check your environment variables for remote providers
+echo $OPENAI_API_KEY
 ```
 
 **"401 Unauthorized"**
-- Check if your API key is valid
+- Check if your API key is valid (for remote providers)
 - Ensure key has necessary permissions
-- For GitHub: try regenerating the token
+- For Ollama: verify it's running on localhost:11434
 
 **"429 Rate Limited"**
 - Wait a few minutes before retrying
@@ -248,7 +237,7 @@ GITHUB_TOKEN="invalid-key" npm run test:llm-manual
 
 1. **Start with examples**: Use fixture files to understand expected behavior
 2. **Test incrementally**: Start with simple workflows, add complexity
-3. **Compare APIs**: Try both GitHub Copilot and OpenAI for comparison
+3. **Compare APIs**: Try both Ollama and OpenAI for comparison
 4. **Document results**: Keep track of interesting test cases
 5. **Respect rate limits**: Add delays between requests in automated testing
 
@@ -256,7 +245,8 @@ GITHUB_TOKEN="invalid-key" npm run test:llm-manual
 
 - Never commit API keys to version control
 - Use environment variables for sensitive data
-- Be aware that workflow content is sent to external APIs
+- By default (Ollama), all data stays local — nothing is sent to external APIs
+- When using remote providers, be aware that workflow content is sent externally
 - Consider using test/dummy data for sensitive workflows
 
 ## 📈 Advanced Testing

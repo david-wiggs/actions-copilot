@@ -36,9 +36,8 @@ const apiType = getArg('api') || determineApiType();
 function determineApiType(): string {
   const apiUrl = process.env.LLM_API_URL || '';
   if (apiUrl.includes('openai.com')) return 'openai';
-  if (apiUrl.includes('anthropic.com')) return 'anthropic';
   if (apiUrl.includes('azure.com')) return 'azure';
-  return 'copilot';
+  return 'ollama';
 }
 
 async function main() {
@@ -46,11 +45,11 @@ async function main() {
   
   // Configuration for different API providers
   const configs: Record<string, AppConfig> = {
-    copilot: {
+    ollama: {
       llm: {
-        apiUrl: process.env.LLM_API_URL || 'https://api.githubcopilot.com/chat/completions',
-        apiKey: process.env.LLM_API_KEY || process.env.COPILOT_API_KEY || process.env.GITHUB_TOKEN || '',
-        model: process.env.LLM_MODEL || 'gpt-4',
+        apiUrl: process.env.LLM_API_URL || 'http://localhost:11434/v1/chat/completions',
+        apiKey: process.env.LLM_API_KEY || 'ollama',
+        model: process.env.LLM_MODEL || 'mistral:7b',
         maxTokens: parseInt(process.env.LLM_MAX_TOKENS || '2048'),
         temperature: parseFloat(process.env.LLM_TEMPERATURE || '0.1')
       },
@@ -59,6 +58,15 @@ async function main() {
         blockedKeywords: ['curl', 'wget', 'nc', 'netcat', 'sudo', 'rm -rf', 'ssh'],
         allowedActions: ['actions/checkout@v4', 'actions/setup-node@v4', 'actions/upload-artifact@v3'],
         blockOnMaliciousDetection: true
+      },
+      dependencyAnalysis: {
+        enabled: true,
+        resolveTransitive: true,
+        requireShaPin: false,
+        approvedOrganizations: [],
+        blockedActions: [],
+        blockOnPolicyViolation: false,
+        minimumViolationSeverity: 'high'
       }
     },
     openai: {
@@ -74,21 +82,15 @@ async function main() {
         blockedKeywords: ['curl', 'wget', 'nc', 'netcat', 'sudo', 'rm -rf', 'ssh'],
         allowedActions: ['actions/checkout@v4', 'actions/setup-node@v4', 'actions/upload-artifact@v3'],
         blockOnMaliciousDetection: true
-      }
-    },
-    anthropic: {
-      llm: {
-        apiUrl: 'https://api.anthropic.com/v1/messages',
-        apiKey: process.env.ANTHROPIC_API_KEY || '',
-        model: 'claude-3-sonnet-20240229',
-        maxTokens: 2048,
-        temperature: 0.1
       },
-      protectionRules: {
-        enabledEnvironments: ['production', 'staging'],
-        blockedKeywords: ['curl', 'wget', 'nc', 'netcat', 'sudo', 'rm -rf', 'ssh'],
-        allowedActions: ['actions/checkout@v4', 'actions/setup-node@v4', 'actions/upload-artifact@v3'],
-        blockOnMaliciousDetection: true
+      dependencyAnalysis: {
+        enabled: true,
+        resolveTransitive: true,
+        requireShaPin: false,
+        approvedOrganizations: [],
+        blockedActions: [],
+        blockOnPolicyViolation: false,
+        minimumViolationSeverity: 'high'
       }
     }
   };
@@ -96,16 +98,15 @@ async function main() {
   const config = configs[apiType];
   if (!config) {
     console.error(`❌ Unknown API type: ${apiType}`);
-    console.log('Available APIs: copilot, openai, anthropic');
+    console.log('Available APIs: ollama, openai');
     process.exit(1);
   }
 
   if (!config.llm.apiKey) {
     console.error(`❌ API key not found for ${apiType}`);
     console.log(`Please set the appropriate environment variable:`);
-    console.log(`  - GitHub Copilot: COPILOT_API_KEY or GITHUB_TOKEN`);
+    console.log(`  - Ollama: LLM_API_KEY=ollama (ensure ollama is running)`);
     console.log(`  - OpenAI: OPENAI_API_KEY or LLM_API_KEY`);
-    console.log(`  - Anthropic: ANTHROPIC_API_KEY`);
     process.exit(1);
   }
 

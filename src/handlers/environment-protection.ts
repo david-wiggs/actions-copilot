@@ -2,7 +2,7 @@ import { Context } from "probot";
 import { CopilotService } from "../services/copilot-service";
 import { ConfigService } from "../services/config-service";
 import { DependencyService } from "../services/dependency-service";
-import { WorkflowAnalysis } from "../types";
+import { WorkflowAnalysis, DependencyPolicyViolation } from "../types";
 
 export class EnvironmentProtectionHandler {
   constructor(
@@ -49,6 +49,13 @@ export class EnvironmentProtectionHandler {
           workflowContent,
           config.dependencyAnalysis
         );
+
+        // Scan for suspicious npm lifecycle scripts if the workflow runs package install
+        if (this.dependencyService.workflowRunsPackageInstall(workflowContent)) {
+          context.log.info("Workflow runs package install — scanning for lifecycle script risks...");
+          const lifecycleViolations = await this.scanForLifecycleScriptRisks(context, deployment.ref, workflowContent);
+          dependencySnapshot.policyViolations.push(...lifecycleViolations);
+        }
 
         // Check if dependency policy violations alone should block
         if (config.dependencyAnalysis.blockOnPolicyViolation && dependencySnapshot.policyViolations.length > 0) {
@@ -139,12 +146,15 @@ export class EnvironmentProtectionHandler {
     const deployment = context.payload.deployment;
     if (!deployment) return;
 
+    // Get installation token from Probot's authenticated octokit
+    const token = await (context.octokit.auth({ type: "installation" }) as Promise<{ token: string }>).then(auth => auth.token);
+
     // Use the deployment callback URL to respond to the protection rule
     await fetch(context.payload.deployment_callback_url || "", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `token ${process.env.GITHUB_TOKEN}`,
+        "Authorization": `token ${token}`,
       },
       body: JSON.stringify({
         environment_name: context.payload.environment || "",
@@ -158,12 +168,15 @@ export class EnvironmentProtectionHandler {
     const deployment = context.payload.deployment;
     if (!deployment) return;
 
+    // Get installation token from Probot's authenticated octokit
+    const token = await (context.octokit.auth({ type: "installation" }) as Promise<{ token: string }>).then(auth => auth.token);
+
     // Use the deployment callback URL to respond to the protection rule
     await fetch(context.payload.deployment_callback_url || "", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `token ${process.env.GITHUB_TOKEN}`,
+        "Authorization": `token ${token}`,
       },
       body: JSON.stringify({
         environment_name: context.payload.environment || "",
@@ -179,13 +192,16 @@ export class EnvironmentProtectionHandler {
     const deployment = context.payload.deployment;
     if (!deployment) return;
 
+    // Get installation token from Probot's authenticated octokit
+    const token = await (context.octokit.auth({ type: "installation" }) as Promise<{ token: string }>).then(auth => auth.token);
+
     // For now, we'll approve but with a warning comment
     // In a real implementation, you might want to create an issue or notification
     await fetch(context.payload.deployment_callback_url || "", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `token ${process.env.GITHUB_TOKEN}`,
+        "Authorization": `token ${token}`,
       },
       body: JSON.stringify({
         environment_name: context.payload.environment || "",
@@ -193,5 +209,75 @@ export class EnvironmentProtectionHandler {
         comment: comment,
       }),
     });
+  }
+
+  /**
+   * Fetches package-lock.json from the repo and scans for dependencies
+   * that declare install lifecycle scripts (preinstall/install/postinstall).
+   * These are the primary entry point for supply-chain attacks.
+   *
+   * Uses two complementary strategies:
+   * 1. Lockfile scan — fast, covers all deps including transitive (authoritative for `npm ci`)
+   * 2. Registry check — queries npm for direct deps' scripts (catches stale lockfiles
+   *    or `npm install` resolving to newer compromised versions)
+   */
+  private async scanForLifecycleScriptRisks(
+    context: Context,
+    ref: string,
+    workflowContent: string
+  ): Promise<DependencyPolicyViolation[]> {
+    const repoInfo = context.repo();
+    const violations: DependencyPolicyViolation[] = [];
+
+    // Strategy 1: Lockfile scan (fast, covers transitive deps)
+    try {
+      const { data } = await context.octokit.rest.repos.getContent({
+        owner: repoInfo.owner,
+        repo: repoInfo.repo,
+        path: "package-lock.json",
+        ref,
+      });
+
+      if ("content" in data) {
+        const lockfileContent = Buffer.from(data.content, "base64").toString();
+        const lockfileViolations = this.dependencyService.scanLockfileForInstallScripts(lockfileContent);
+        violations.push(...lockfileViolations);
+      }
+    } catch {
+      context.log.debug("No package-lock.json found, skipping lockfile scan");
+    }
+
+    // Strategy 2: Registry check on direct deps (catches stale lockfiles)
+    // Only needed when workflow uses `npm install` (not `npm ci` which strictly uses the lockfile)
+    const usesLooseInstall = /\bnpm\s+install\b/.test(workflowContent) || /\bnpm\s+i\b/.test(workflowContent);
+    if (usesLooseInstall) {
+      context.log.info("Workflow uses 'npm install' (not 'npm ci') — checking registry for install scripts on direct deps...");
+      try {
+        const { data } = await context.octokit.rest.repos.getContent({
+          owner: repoInfo.owner,
+          repo: repoInfo.repo,
+          path: "package.json",
+          ref,
+        });
+
+        if ("content" in data) {
+          const packageJsonContent = Buffer.from(data.content, "base64").toString();
+          const registryViolations = await this.dependencyService.checkRegistryForInstallScripts(packageJsonContent);
+
+          // Deduplicate — don't re-flag packages already caught by lockfile scan
+          const alreadyFlagged = new Set(violations.map(v => v.package.split("@")[0]));
+          for (const v of registryViolations) {
+            const pkgName = v.package.split("@")[0];
+            if (!alreadyFlagged.has(pkgName)) {
+              violations.push(v);
+            }
+          }
+        }
+      } catch {
+        context.log.debug("Could not fetch package.json for registry check");
+      }
+    }
+
+    return violations;
   }
 }
